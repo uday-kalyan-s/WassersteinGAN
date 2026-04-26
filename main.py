@@ -72,11 +72,19 @@ if __name__=="__main__":
                                     transforms.ToTensor(),
                                     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
                                 ]))
+    # elif opt.dataset == 'lsun': # need to use imagefolder with processed kaggle
+    #     dataset = dset.LSUN(db_path=opt.dataroot, classes=['bedroom_train'],
+    #                         transform=transforms.Compose([
+    #                             transforms.Resize(opt.imageSize),
+    #                             transforms.CenterCrop(opt.imageSize),
+    #                             transforms.ToTensor(),
+    #                             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+    #                         ]))
     elif opt.dataset == 'lsun':
-        dataset = dset.LSUN(db_path=opt.dataroot, classes=['bedroom_train'],
+        dataset = dset.ImageFolder(root=opt.dataroot,
                             transform=transforms.Compose([
-                                transforms.Resize(opt.imageSize),
-                                transforms.CenterCrop(opt.imageSize),
+                                # transforms.Resize(opt.imageSize), # dont need crop and resize. already done
+                                # transforms.CenterCrop(opt.imageSize),
                                 transforms.ToTensor(),
                                 transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
                             ]))
@@ -162,6 +170,10 @@ if __name__=="__main__":
         optimizerG = optim.RMSprop(netG.parameters(), lr = opt.lrG)
 
     gen_iterations = 0
+
+    loss_D_list = []
+    loss_G_list = []
+    iter_list = []
     for epoch in range(opt.niter):
         data_iter = iter(dataloader)
         i = 0
@@ -174,7 +186,8 @@ if __name__=="__main__":
 
             # train the discriminator Diters times
             if gen_iterations < 25 or gen_iterations % 500 == 0:
-                Diters = 100
+                Diters = 100 # TODO: recheck this
+                # Diters = opt.Diters
             else:
                 Diters = opt.Diters
             j = 0
@@ -227,16 +240,47 @@ if __name__=="__main__":
             optimizerG.step()
             gen_iterations += 1
 
+            # --- ADD THIS ---
+            loss_D_list.append(errD.item())
+            loss_G_list.append(errG.item())
+            iter_list.append(gen_iterations)
+            # ----------------
+
             print('[%d/%d][%d/%d][%d] Loss_D: %f Loss_G: %f Loss_D_real: %f Loss_D_fake %f'
                 % (epoch, opt.niter, i, len(dataloader), gen_iterations,
                 errD.data[0], errG.data[0], errD_real.data[0], errD_fake.data[0]))
-            if gen_iterations % 500 == 0:
+            if gen_iterations % 2000 == 0:   # cleaner spacing for plots
                 real_cpu = real_cpu.mul(0.5).add(0.5)
                 vutils.save_image(real_cpu, '{0}/real_samples.png'.format(opt.experiment))
+
                 fake = netG(Variable(fixed_noise, volatile=True))
                 fake.data = fake.data.mul(0.5).add(0.5)
-                vutils.save_image(fake.data, '{0}/fake_samples_{1}.png'.format(opt.experiment, gen_iterations))
+
+                vutils.save_image(
+                    fake.data,
+                    '{0}/fake_samples_{1}.png'.format(opt.experiment, gen_iterations),
+                    normalize=True
+                )
+
+                single_fake = fake.data[0].unsqueeze(0)
+
+                vutils.save_image(
+                    single_fake,
+                    '{0}/fake_samples_single_{1}.png'.format(opt.experiment, gen_iterations),
+                    normalize=True
+                )
 
         # do checkpointing
         torch.save(netG.state_dict(), '{0}/netG_epoch_{1}.pth'.format(opt.experiment, epoch))
         torch.save(netD.state_dict(), '{0}/netD_epoch_{1}.pth'.format(opt.experiment, epoch))
+
+        # --- SAVE LOSSES ---
+        import json
+
+        with open(os.path.join(opt.experiment, "loss_log.json"), "w") as f:
+            json.dump({
+                "iterations": iter_list,
+                "loss_D": loss_D_list,
+                "loss_G": loss_G_list
+            }, f)
+        # -------------------
